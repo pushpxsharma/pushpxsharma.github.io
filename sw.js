@@ -2,9 +2,15 @@
    Strategy: cache the app shell + libraries on first online visit, then serve
    from cache when offline. The Google Apps Script sync endpoint is never cached
    (it must always hit the network so sync stays correct). */
-var CACHE = 'legaldesk-v44';
+var CACHE = 'legaldesk-v47';
+var CORE = ['./','index.html','LegalDesk.html','manifest.json','corresp-data.js','classification-data.js','limitation-data.js','logo.png','icon-192.png','icon-512.png','icon-180.png','favicon-16.png','favicon-32.png','favicon-48.png','favicon-64.png'];
 
-self.addEventListener('install', function () { self.skipWaiting(); });
+self.addEventListener('install', function (e) {
+  self.skipWaiting();
+  e.waitUntil(caches.open(CACHE).then(function (c) {
+    return Promise.allSettled(CORE.map(function (u) { return c.add(u).catch(function () {}); }));
+  }));
+});
 
 self.addEventListener('activate', function (e) {
   e.waitUntil(
