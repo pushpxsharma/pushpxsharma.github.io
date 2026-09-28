@@ -745,7 +745,7 @@ function _paths(node,path,set){if(Array.isArray(node)){node.forEach(function(x){
 // Bump _m on new/own-changed records. Structural parallel walk: elements matched by id WITHIN each array only (never a global id map), so ids repeating across arrays never collide.
 function _bumpStamp(cur,old,now){var ch=false;function wc(node,onode){Object.keys(node).forEach(function(k){var v=node[k];if(v&&typeof v==='object')walk(v,onode?onode[k]:undefined)})}function walk(c,o){if(Array.isArray(c)){var om={};if(Array.isArray(o))o.forEach(function(x){if(_hasId(x))om[x.id]=x});c.forEach(function(x){if(x&&typeof x==='object'){if(_hasId(x)){var ox=om[x.id];if(!ox||_own(x)!==_own(ox)){x._m=now;ch=true}wc(x,ox)}else wc(x,null)}})}else if(c&&typeof c==='object'){wc(c,(o&&typeof o==='object')?o:null)}}walk(cur,old);return ch}
 // Runs on every local save (base-free): stamp changed records, path-scope tombstones for deletions, clear tombs for anything re-created.
-function _stamp(){if(!D)return;if(!_shadow){_shadow=cl(_slim(D));return}var now=_mNow(),changed=_bumpStamp(D,_shadow,now);var curP={},oldP={};_paths(_slim(D),'',curP);_paths(_shadow,'',oldP);D._tomb=D._tomb||{};Object.keys(oldP).forEach(function(p){if(!curP[p]){D._tomb[p]=now;changed=true}});Object.keys(curP).forEach(function(p){if(D._tomb[p])delete D._tomb[p]});if(changed)D._m=now;_shadow=cl(_slim(D))}
+function _stamp(){if(!D)return;if(!_shadow){_shadow=cl(_slim(D));return}var now=_mNow(),changed=_bumpStamp(D,_shadow,now);var cpk=_plainKeys(_slim(D)),opk=_plainKeys(_shadow);D._pm=D._pm||{};Object.keys(cpk).concat(Object.keys(opk)).forEach(function(k){if(cpk[k]!==opk[k]){D._pm[k]=now;changed=true}});var curP={},oldP={};_paths(_slim(D),'',curP);_paths(_shadow,'',oldP);D._tomb=D._tomb||{};Object.keys(oldP).forEach(function(p){if(!curP[p]){D._tomb[p]=now;changed=true}});Object.keys(curP).forEach(function(p){if(D._tomb[p])delete D._tomb[p]});if(changed)D._m=now;_shadow=cl(_slim(D))}
 function schedulePush(){if(typeof sUrl==='undefined'||!sUrl||_applyingRemote)return;if(_pushTmr)clearTimeout(_pushTmr);_pushTmr=setTimeout(function(){_pushTmr=null;syncNow()},1500)}
 function flushPush(){if(_pushTmr){clearTimeout(_pushTmr);_pushTmr=null}syncNow()}
 function syncState(){if(!sUrl)return'off';if(!navigator.onLine)return'offline';if(sSt==='syncing')return'syncing';if(sSt==='error')return'error';if(!_lastPull||Date.now()-_lastPull>18e5)return'stale';return'synced'}
@@ -773,7 +773,7 @@ function _unionTomb(a,b){var o={};[a,b].forEach(function(t){if(t)Object.keys(t).
 // Path-scoped prune: a tombstone only removes the record at its exact path (never every record that happens to share the id).
 function _prune(root){var tomb=root._tomb||{};(function walk(node,path){if(Array.isArray(node)){for(var i=node.length-1;i>=0;i--){var x=node[i];if(x&&_hasId(x)){var p=path+'/'+x.id;if(tomb[p]&&tomb[p]>_ts(x)){node.splice(i,1);continue}Object.keys(x).forEach(function(k){var v=x[k];if(v&&typeof v==='object')walk(v,p+'/'+k)})}else if(x&&typeof x==='object'){Object.keys(x).forEach(function(k){var v=x[k];if(v&&typeof v==='object')walk(v,path+'/'+k)})}}}else if(node&&typeof node==='object'){Object.keys(node).forEach(function(k){if(k==='_tomb')return;var v=node[k];if(v&&typeof v==='object')walk(v,path+'/'+k)})}})(root,'')}
 function reconcile(remote){
-  var local=cl(D);var m=_lww(local,remote);
+  var local=cl(D);var m=_lww(local,remote);var lp=local._pm||{},rp=(remote&&remote._pm)||{},ks={};Object.keys(local).concat(Object.keys(remote||{})).forEach(function(k){if(k.charAt(0)==='_')return;var lv=local[k],rv=remote?remote[k]:undefined;if((Array.isArray(lv)&&lv.some(_hasId))||(Array.isArray(rv)&&rv.some(_hasId)))return;ks[k]=1});Object.keys(ks).forEach(function(k){var a=lp[k]||0,b=rp[k]||0;if(a>b){if(k in local)m[k]=cl(local[k]);else delete m[k]}else if(b>a){if(remote&&(k in remote))m[k]=cl(remote[k]);else delete m[k]}});var pmm={};Object.keys(lp).concat(Object.keys(rp)).forEach(function(k){pmm[k]=Math.max(lp[k]||0,rp[k]||0)});m._pm=pmm;
   m._tomb=_unionTomb(local._tomb,remote&&remote._tomb);
   var lt=(local.taskOrderTs)||'',rt=(remote&&remote.taskOrderTs)||'';
   if(rt>lt){if(remote&&('taskOrder' in remote)){m.taskOrder=cl(remote.taskOrder);m.taskOrderTs=rt}}else if(lt){m.taskOrder=cl(local.taskOrder);m.taskOrderTs=lt}
@@ -782,13 +782,13 @@ function reconcile(remote){
   _prune(m);
   return m}
  function _slim(o){return JSON.parse(JSON.stringify(o,function(k,v){if((k==='file'||k==='fileData')&&typeof v==='string'&&(v.length>400||v.slice(0,5)==='data:'))return undefined;return v}))}
-function _jsonp(url){return new Promise(function(resolve,reject){var cb='_ldcb'+Date.now()+Math.floor(Math.random()*1e6),s=document.createElement('script'),done=false;var to=setTimeout(function(){if(done)return;fin();reject(new Error('jsonp timeout'))},14000);function fin(){done=true;clearTimeout(to);try{delete window[cb]}catch(e){window[cb]=undefined}if(s.parentNode)s.parentNode.removeChild(s)}window[cb]=function(d){if(done)return;fin();resolve(d)};s.onerror=function(){if(done)return;fin();reject(new Error('jsonp blocked'))};s.src=url+(url.indexOf('?')<0?'?':'&')+'callback='+cb+'&t='+Date.now();document.head.appendChild(s)})}
-function _corsGet(url){return fetch(url+(url.indexOf('?')<0?'?':'&')+'t='+Date.now(),{cache:'no-store'}).then(function(r){return r.text()}).then(function(t){t=(t||'').trim();if(!t)return{empty:true};if(t.charAt(0)==='<')throw new Error('html page');return JSON.parse(t)})}
+function _jsonp(url){return new Promise(function(resolve,reject){var cb='_ldcb'+Date.now()+Math.floor(Math.random()*1e6),s=document.createElement('script'),done=false;var to=setTimeout(function(){if(done)return;fin();reject(new Error('jsonp timeout'))},35000);function fin(){done=true;clearTimeout(to);try{delete window[cb]}catch(e){window[cb]=undefined}if(s.parentNode)s.parentNode.removeChild(s)}window[cb]=function(d){if(done)return;fin();resolve(d)};s.onerror=function(){if(done)return;fin();reject(new Error('jsonp blocked'))};s.src=url+(url.indexOf('?')<0?'?':'&')+'callback='+cb+'&t='+Date.now();document.head.appendChild(s)})}
+function _corsGet(url){var ac=(typeof AbortController!=='undefined')?new AbortController():null;if(ac)setTimeout(function(){try{ac.abort()}catch(e){}},45000);return fetch(url+(url.indexOf('?')<0?'?':'&')+'t='+Date.now(),{cache:'no-store',signal:ac?ac.signal:undefined}).then(function(r){return r.text()}).then(function(t){t=(t||'').trim();if(!t)return{empty:true};if(t.charAt(0)==='<')throw new Error('html page');return JSON.parse(t)})}
 // RACE-transport read. Fire JSONP and a plain cors GET at the SAME time and take whichever returns valid data first (hard cap ~14s). Google's /exec redirect randomly 404s on one transport while the other works, and one can hang for a minute — racing means a single healthy transport gives a fast answer instead of waiting out the slow one.
 function _fetchJSON(url){
   return new Promise(function(resolve,reject){
     var done=false,pending=2;
-    var cap=setTimeout(function(){if(done)return;done=true;reject(new Error('cloud slow this cycle \u2014 retrying'))},14000);
+    var cap=setTimeout(function(){if(done)return;done=true;reject(new Error('cloud slow this cycle \u2014 retrying'))},35000);
     function win(v){if(done)return;done=true;clearTimeout(cap);resolve(v)}
     function lose(){pending--;if(!done&&pending<=0){done=true;clearTimeout(cap);reject(new Error('cloud busy this cycle \u2014 retrying'))}}
     _jsonp(url).then(function(a){if(a&&typeof a==='object')win(a);else lose()},lose);
@@ -816,7 +816,7 @@ async function syncNow(){
     if(changedLocal){var busy=modal||(document.activeElement&&/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));if(!busy)R();else toast('\u21bb Updated \u2014 new changes synced')}
   }catch(e){
     _syncFails++;
-    if(_syncFails>=6){sSt='error';_syncErr=(e&&e.message)||'network';_syncErrT=new Date().toLocaleString();_saveDiag();if(!_diagRunning){_diagRunning=true;testSync(true).then(function(){_diagRunning=false},function(){_diagRunning=false})}}
+    if(_syncFails>=8){sSt='error';_syncErr=(e&&e.message)||'network';_syncErrT=new Date().toLocaleString();_saveDiag();if(!_diagRunning){_diagRunning=true;testSync(true).then(function(){_diagRunning=false},function(){_diagRunning=false})}}
     else{sSt='synced';var wait=Math.min(3000*_syncFails,20000);setTimeout(function(){if(!_syncBusy&&sUrl)syncNow()},wait)} // transient Google flakiness: stay green, retry with backoff (don't hammer / trigger throttling)
   }
   finally{_syncBusy=false;rSI();if(_syncAgain){_syncAgain=false;setTimeout(syncNow,300)}}
@@ -831,7 +831,7 @@ function rSI(){rSIx()}
 
 // ====== MAIN RENDER ======
 function R(){
-  normLists();syncAllNdoh();syncAllTl();applyPalette();sL();document.documentElement.setAttribute('data-theme',theme);
+  if(!_applyingRemote)_stamp();normLists();syncAllNdoh();syncAllTl();if(D&&_shadow)_shadow=cl(_slim(D));applyPalette();sL();document.documentElement.setAttribute('data-theme',theme);
   var a=document.getElementById('app'),t=TD();var _fcap=_captureFocus();
   var upCount=upH().length,tkPend=pendingTasks().length;
   var todayCount=workTodayCount();
@@ -2508,7 +2508,7 @@ async function fsRun(){if(FS.busy||!sUrl||!navigator.onLine||!D)return;FS.busy=t
 }catch(e){FS.lastErr=String(e&&e.message||e)}finally{FS.busy=false;_fsUi()}}
 async function fsUpload(id,meta){var rec=await idbGet(id);if(!rec||!rec.blob){delete FS.localIds[id];return false}var blob=rec.blob,n=Math.max(1,Math.ceil(blob.size/FCH));FS.cur={id:id,name:meta.name,pct:0};_fsUi();
   for(var at=0;at<3;at++){var st=await _fj1(sUrl+'?op=fstat&id='+encodeURIComponent(id)+'&n='+n);if(st&&st.done){FS.man[id]=1;FS.cur=null;return true}if(!st||st.error)throw new Error((st&&st.error)||'status');var have={};(st.have||[]).forEach(function(k){have[k]=1});FS.cur.pct=Math.round(Object.keys(have).length/n*100);_fsUi();
-    for(var i=0;i<n;i++){if(have[i])continue;if(!navigator.onLine||!sUrl)return false;var b64=await _blobB64(blob.slice(i*FCH,Math.min(blob.size,(i+1)*FCH)));await fetch(sUrl+'?op=chunk',{method:'POST',mode:'no-cors',body:JSON.stringify({id:id,i:i,n:n,name:meta.name,mime:rec.mime||blob.type||'',path:meta.path,b64:b64})});have[i]=1;FS.cur.pct=Math.round(Object.keys(have).length/n*100);_fsUi()}
+    for(var i=0;i<n;i++){if(have[i])continue;if(!navigator.onLine||!sUrl)return false;var b64=await _blobB64(blob.slice(i*FCH,Math.min(blob.size,(i+1)*FCH)));await fetch(sUrl+'?op=chunk',{method:'POST',mode:'no-cors',body:JSON.stringify({id:id,i:i,n:n,name:meta.name,mime:rec.mime||blob.type||'',path:meta.path,b64:b64})});have[i]=1;FS.cur.pct=Math.round(Object.keys(have).length/n*100);_fsUi();await _sleep(300)}
     await _sleep(1200)}
   var s2=await _fj1(sUrl+'?op=fstat&id='+encodeURIComponent(id)+'&n='+n);FS.cur=null;if(s2&&s2.done){FS.man[id]=1;return true}return false}
 function fsBackupNow(){if(!sUrl)return toast('Connect Sync first');fsCheck().then(function(ok){if(!ok)return toast('Update the Apps Script first');toast('\u2601 Backing up to Drive\u2026');return _fj1(sUrl+'?op=backup').then(function(r){if(r&&r.ok){FS.bk=r.name;toast('\u2705 Backed up \u00b7 '+r.name);_fsUi()}else toast('Backup failed: '+((r&&r.error)||'unknown'))})}).catch(function(){toast('Backup failed \u2014 check connection')})}
@@ -2527,13 +2527,14 @@ var _pushedPlain=null;function _plainKeys(o){var r={};Object.keys(o||{}).forEach
 function _markPushed(m,snap){if(snap)_pushedPlain=_plainKeys(snap);_lastPushM=Math.max(_lastPushM,m||0);try{localStorage.setItem('ld_pushM',String(_lastPushM))}catch(e){}}
 function _sparseRec(x,L){var ch=(x._m||0)>L,o={},any=ch;Object.keys(x).forEach(function(k){var v=x[k];if(Array.isArray(v)&&v.some(_hasId)){var s=_sparseArr(v,L);if(s){o[k]=s;any=true}}else if(ch||k==='id'||k==='_m')o[k]=v});return any?o:null}
 function _sparseArr(a,L){var out=[];a.forEach(function(x){if(_hasId(x)){var s=_sparseRec(x,L);if(s)out.push(s)}});return out.length?out:null}
-function _buildDelta(L){var d={_delta:1,_tomb:{}},n=0,src=_slim(D);Object.keys(src).forEach(function(k){if(k==='_tomb')return;var v=src[k];if(Array.isArray(v)&&v.some(_hasId)){var s=_sparseArr(v,L);if(s){d[k]=s;n++}}});var t=src._tomb||{};Object.keys(t).forEach(function(p){if(t[p]>L){d._tomb[p]=t[p];n++}});if(_pushedPlain){var cur=_plainKeys(src),pl={};Object.keys(cur).forEach(function(k){if(cur[k]!==_pushedPlain[k]){pl[k]=src[k];n++}});if(Object.keys(pl).length)d._plain=pl}d._n=n;return d}
+function _buildDelta(L){var d={_delta:1,_tomb:{}},n=0,src=_slim(D);Object.keys(src).forEach(function(k){if(k==='_tomb')return;var v=src[k];if(Array.isArray(v)&&v.some(_hasId)){var s=_sparseArr(v,L);if(s){d[k]=s;n++}}});var t=src._tomb||{};Object.keys(t).forEach(function(p){if(t[p]>L){d._tomb[p]=t[p];n++}});if(_pushedPlain){var cur=_plainKeys(src),pl={};Object.keys(cur).forEach(function(k){if(cur[k]!==_pushedPlain[k]){pl[k]=src[k];n++}});if(Object.keys(pl).length){d._plain=pl;d._pmx={};Object.keys(pl).forEach(function(k){d._pmx[k]=(D._pm&&D._pm[k])||_mNow()})}}d._n=n;return d}
 function _flushOnHide(){if(!sUrl||!D||!navigator.onLine)return;if(Date.now()-_hideT<2000)return;_hideT=Date.now();var dirty=((D._m||0)>_lastPushM)||!!_pushTmr;if(!dirty)return;if(_pushTmr){clearTimeout(_pushTmr);_pushTmr=null}
   if(FS.ok){try{var d=_buildDelta(_lastPushM);if(d._n>0){delete d._n;var s=JSON.stringify(d);if(s.length<60000)fetch(sUrl+'?op=delta',{method:'POST',mode:'no-cors',keepalive:true,body:s}).catch(function(){})}}catch(e){}}
   try{syncNow()}catch(e){}}
 document.addEventListener('visibilitychange',function(){if(document.hidden)_flushOnHide();else fsKick()});
 window.addEventListener('pagehide',_flushOnHide);
 window.addEventListener('online',function(){FS.okT=0;fsKick()});
+setTimeout(function(){if(sUrl)fsKick()},8000);setInterval(function(){if(sUrl&&!FS.busy&&!document.hidden&&navigator.onLine)fsKick()},180000);
 
 // ================= end v49 =================
 // ====== INIT ======
